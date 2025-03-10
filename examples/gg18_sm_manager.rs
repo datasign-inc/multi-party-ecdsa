@@ -1,9 +1,10 @@
 use std::collections::HashMap;
 use std::fs;
 use std::sync::RwLock;
+use std::process::Command;
 
-use rocket::serde::json::Json;
-use rocket::{post, routes, State};
+use rocket::serde::{Deserialize, json::Json};
+use rocket::{post, routes, State, http::Status};
 use uuid::Uuid;
 
 mod common;
@@ -98,6 +99,43 @@ fn signup_sign(db_mtx: &State<RwLock<HashMap<Key, String>>>) -> Json<Result<Part
     Json(Ok(party_signup))
 }
 
+#[derive(Deserialize)]
+struct SignUpRequest {
+    server_url: String,
+    key_file: String,
+}
+#[derive(Deserialize)]
+struct SignRequest {
+    server_url: String,
+    key_file: String,
+    message: String,
+}
+
+#[post("/boot_counter_party", format = "json", data = "<sign_up_request>")]
+fn boot_counter_party(sign_up_request: Json<SignUpRequest>) -> Status {
+    let _ = Command::new("./gg18_keygen_client")
+        .arg(&sign_up_request.server_url)
+        .arg(&sign_up_request.key_file)
+        .spawn();
+    Status::NoContent // 204 No Content を返す
+}
+
+#[post("/boot_counter_party_to_sign", format = "json", data = "<sign_request>")]
+fn boot_counter_party_to_sign(sign_request: Json<SignRequest>) -> Status {
+    match Command::new("./gg18_sign_client")
+        .arg(&sign_request.server_url)
+        .arg(&sign_request.key_file)
+        .arg(&sign_request.message)
+        .spawn()
+    {
+        Ok(_) => Status::NoContent,  // 成功時に204を返す
+        Err(e) => {
+            eprintln!("Failed to start process: {}", e);
+            Status::InternalServerError
+        }
+    }
+}
+
 #[tokio::main]
 async fn main() {
     // let mut my_config = Config::development();
@@ -135,7 +173,7 @@ async fn main() {
     }
     /////////////////////////////////////////////////////////////////
     rocket::build()
-        .mount("/", routes![get, set, signup_keygen, signup_sign])
+        .mount("/", routes![get, set, signup_keygen, signup_sign, boot_counter_party, boot_counter_party_to_sign])
         .manage(db_mtx)
         .launch()
         .await
